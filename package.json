@@ -1,0 +1,20 @@
+{
+  "name": "@yegorvk/node-vcam",
+  "version": "0.1.0",
+  "description": "Simple virtual camera API for Node.js.",
+  "license": "(MIT OR Apache-2.0)",
+  "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
+  "os": ["win32"],
+  "type": "module",
+  "main": "index.ts",
+  "devDependencies": {
+    "@napi-rs/cli": "^3.4.1"
+  },
+  "scripts": {
+    "install": "napi build --release --platform --esm --output-dir build"
+  },
+  "engines": {
+    "node": ">=25",
+    "npm": ">=11"
+  }
+}

@@ -1,0 +1,14 @@
+# IDEs and editors
+/.idea/
+/.vscode/
+
+# Build artifacts
+/target/
+/node_modules/
+
+# Build output
+/build/
+
+# Lockfiles
+/Cargo.lock
+/package-lock.json
