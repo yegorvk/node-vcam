@@ -1,20 +1,34 @@
 {
-  "name": "@yegorvk/node-vcam",
-  "version": "0.1.0",
-  "description": "Simple virtual camera API for Node.js.",
-  "license": "(MIT OR Apache-2.0)",
-  "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
-  "os": ["win32"],
-  "type": "module",
-  "main": "index.ts",
-  "devDependencies": {
-    "@napi-rs/cli": "^3.4.1"
-  },
-  "scripts": {
-    "install": "napi build --release --platform --esm --output-dir build"
-  },
-  "engines": {
-    "node": ">=25",
-    "npm": ">=11"
-  }
+    "name": "@yegorvk/node-vcam",
+    "version": "0.1.0",
+    "description": "Simple virtual camera API for Node.js.",
+    "license": "(MIT OR Apache-2.0)",
+    "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
+    "os": [
+        "win32"
+    ],
+    "type": "module",
+    "main": "index.ts",
+    "devDependencies": {
+        "@eslint/js": "^9.39.1",
+        "@napi-rs/cli": "^3.4.1",
+        "@types/node": "^24.10.0",
+        "eslint": "^9.39.1",
+        "eslint-config-prettier": "^10.1.8",
+        "globals": "^16.5.0",
+        "jiti": "^2.6.1",
+        "prettier": "^3.6.2",
+        "typescript-eslint": "^8.46.3"
+    },
+    "scripts": {
+        "install": "node scripts/build.ts",
+        "build": "node scripts/build.ts",
+        "demo": "node scripts/demo.ts",
+        "format": "node scripts/format.ts",
+        "check": "node scripts/check.ts",
+        "clean": "node scripts/clean.ts"
+    },
+    "engines": {
+        "node": ">=25"
+    }
 }

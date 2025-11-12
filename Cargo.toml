@@ -9,6 +9,12 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "3.4.0"
 napi-derive = "3.3.0"
+widestring = "1.2.1"
+snafu = "0.8.9"
+
+[dependencies.windows]
+version = "0.62.2"
+features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Security"]
 
 [build-dependencies]
 napi-build = "2.2.4"
