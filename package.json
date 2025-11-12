@@ -10,9 +10,11 @@
     "type": "module",
     "main": "index.js",
     "types": "index.d.ts",
+    "dependencies": {
+        "@napi-rs/cli": "^3.4.1"
+    },
     "devDependencies": {
         "@eslint/js": "^9.39.1",
-        "@napi-rs/cli": "^3.4.1",
         "@types/node": "^24.10.0",
         "eslint": "^9.39.1",
         "eslint-config-prettier": "^10.1.8",
