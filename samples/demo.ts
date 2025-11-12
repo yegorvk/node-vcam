@@ -1,4 +1,4 @@
-import { Camera } from "../index.ts";
+import { Camera } from "../index.js";
 
 const FPS = 60.0;
 
