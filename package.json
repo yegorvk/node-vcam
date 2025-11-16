@@ -2,36 +2,69 @@
     "name": "@yegorvk/node-vcam",
     "version": "0.1.0",
     "description": "Simple virtual camera API for Node.js.",
-    "license": "(MIT OR Apache-2.0)",
-    "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
-    "os": [
-        "win32"
-    ],
     "type": "module",
     "main": "index.js",
     "types": "index.d.ts",
-    "dependencies": {
-        "@napi-rs/cli": "^3.4.1"
+    "repository": {
+        "type": "git",
+        "url": "git+http://git@github.com/yegorvk/node-vcam"
     },
-    "devDependencies": {
-        "@eslint/js": "^9.39.1",
-        "@types/node": "^24.10.0",
-        "eslint": "^9.39.1",
-        "eslint-config-prettier": "^10.1.8",
-        "globals": "^16.5.0",
-        "jiti": "^2.6.1",
-        "prettier": "^3.6.2",
-        "typescript-eslint": "^8.46.3"
+    "license": "MIT",
+    "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
+    "files": [
+        "index.js",
+        "index.d.ts",
+        "build/release/index.js"
+    ],
+    "napi": {
+        "binaryName": "node-vcam",
+        "targets": [
+            "x86_64-pc-windows-msvc"
+        ]
+    },
+    "os": [
+        "win32"
+    ],
+    "cpu": [
+        "x64"
+    ],
+    "engines": {
+        "node": ">=16"
+    },
+    "publishConfig": {
+        "registry": "https://registry.npmjs.org/",
+        "access": "public"
     },
     "scripts": {
-        "install": "node scripts/build.js",
-        "build": "node scripts/build.js",
-        "demo": "node scripts/demo.js",
-        "format": "node scripts/format.js",
-        "check": "node scripts/check.js",
-        "clean": "node scripts/clean.js"
+        "artifacts": "napi artifacts",
+        "build": "node scripts/napi-build.js --release",
+        "build:debug": "node scripts/napi-build.js",
+        "dev": "run-s build:debug \"node:debug -- {1}\" -- examples/animated.js",
+        "node:debug": "cross-env NODE_VCAM_DEBUG=1 node",
+        "format": "run-p format:prettier format:rs format:toml",
+        "format:prettier": "prettier . -w",
+        "format:toml": "taplo format",
+        "format:rs": "cargo fmt",
+        "lint": "cargo clippy",
+        "prepare": "husky",
+        "prepublishOnly": "napi prepublish -t npm"
     },
-    "engines": {
-        "node": ">=25"
-    }
+    "devDependencies": {
+        "@napi-rs/cli": "^3.4.1",
+        "@taplo/cli": "^0.7.0",
+        "@types/node": "^24.10.1",
+        "cross-env": "^10.1.0",
+        "husky": "^9.1.7",
+        "npm-run-all2": "^8.0.4",
+        "prettier": "^3.6.2",
+        "typescript": "^5.9.2"
+    },
+    "prettier": {
+        "trailingComma": "all",
+        "useTabs": false,
+        "tabWidth": 4,
+        "semi": true,
+        "singleQuote": false
+    },
+    "packageManager": "yarn@4.11.0"
 }

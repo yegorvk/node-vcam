@@ -1,8 +1,9 @@
 {
     "recommendations": [
         "rust-lang.rust-analyzer",
-        "tamasfe.even-better-toml",
         "esbenp.prettier-vscode",
-        "dbaeumer.vscode-eslint"
+        "tamasfe.even-better-toml",
+        "arcanis.vscode-zipfs",
+        "oxc.oxc-vscode"
     ]
 }

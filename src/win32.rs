@@ -1,14 +1,14 @@
+use crate::utils::{StrExt, ToUC16StringError};
 use snafu::prelude::*;
-use std::marker::PhantomData;
-use std::ptr::NonNull;
-use std::slice;
+use std::{
+    fmt::{self, Display},
+    ptr::NonNull,
+};
 use windows::Win32::Foundation::HANDLE;
 use windows::core::PCWSTR;
 
-use crate::utils::{StrExt, ToUC16StringError};
-
 // Generic Windows API error type.
-type Win32Error = windows::core::Error;
+type OsError = windows::core::Error;
 
 /// Represents an owned object handle.
 // SAFETY: always owns a valid handle.
@@ -24,8 +24,18 @@ impl Handle {
     /// # Safety
     /// - `handle` must be a valid handle.
     /// - The same handle must not be used elsewhere.
-    unsafe fn new(handle: HANDLE) -> Handle {
-        Handle(handle)
+    unsafe fn new(handle: HANDLE) -> Self {
+        Self(handle)
+    }
+
+    fn get(&self) -> HANDLE {
+        self.0
+    }
+}
+
+impl Display for Handle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:x}", self.0.0.addr()))
     }
 }
 
@@ -34,31 +44,31 @@ impl Drop for Handle {
         use windows::Win32::Foundation::CloseHandle;
         // SAFETY: `Handle` always contains a valid handle.
         unsafe { CloseHandle(self.0) }
-            .unwrap_or_else(|e| eprintln!("Failed to close the handle: {e}."));
+            .unwrap_or_else(|e| eprintln!("Failed to close a handle ({self}): {e}"));
     }
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum OpenMutexError {
-    #[snafu(display("invalid mutex name: `{name}`"))]
+    #[snafu(display("Invalid mutex name: `{name}`."))]
     InvalidName {
         source: ToUC16StringError,
         name: String,
     },
 
-    #[snafu(display("failed to open an existing mutex (`{name}`)"))]
-    Os { source: Win32Error, name: String },
+    #[snafu(display("Failed to open an existing named mutex: `{name}`."))]
+    Os { source: OsError, name: String },
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum LockMutexError {
-    #[snafu(display("timed out while acquiring the mutex"))]
+    #[snafu(display("Timed out while trying to acquire a mutex."))]
     Timeout,
 
-    #[snafu(display("failed to wait on the mutex"))]
-    Os { source: Win32Error },
+    #[snafu(display("Failed to wait on a mutex."))]
+    Os { source: OsError },
 }
 
 /// Represents a Win32 mutex.
@@ -99,9 +109,9 @@ impl Mutex {
     }
 
     /// Acquires the mutex lock, blocking the current thread until it is available or the timeout elapses.
-    fn lock(&'_ mut self) -> Result<MutexGuard<'_>, LockMutexError> {
+    fn lock(&'_ mut self, should_block: bool) -> Result<MutexGuard<'_>, LockMutexError> {
         // SAFETY: `self.handle` refers to a valid mutex.
-        let result = unsafe { wait_for_single_object(self.handle.0) };
+        let result = unsafe { wait_for_single_object(self.handle.get(), should_block) };
 
         match result {
             WaitSingle::Object0 | WaitSingle::Abandoned => Ok(MutexGuard { mutex: self }),
@@ -110,11 +120,11 @@ impl Mutex {
         }
     }
 
-    pub fn with_lock<F, B>(&mut self, f: F) -> Result<B, LockMutexError>
+    pub fn with_lock<F, B>(&mut self, should_block: bool, f: F) -> Result<B, LockMutexError>
     where
         F: FnOnce() -> B,
     {
-        let _guard = self.lock()?;
+        let _guard = self.lock(should_block)?;
         Ok(f())
     }
 }
@@ -127,51 +137,52 @@ impl Drop for MutexGuard<'_> {
     fn drop(&mut self) {
         use windows::Win32::System::Threading::ReleaseMutex;
         // SAFETY: `ReleaseMutex` is always safe to call.
-        unsafe { ReleaseMutex(self.mutex.handle.0) }
-            .unwrap_or_else(|e| eprintln!("Failed to release the mutex: {e}."));
+        unsafe { ReleaseMutex(self.mutex.handle.get()) }.unwrap_or_else(|e| {
+            eprintln!("Failed to release a mutex ({}): {e}", self.mutex.handle)
+        });
     }
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum CreateEventError {
-    #[snafu(display("invalid event name: `{name}`"))]
+    #[snafu(display("Invalid event name: `{name}`."))]
     InvalidName {
         source: ToUC16StringError,
         name: String,
     },
 
-    #[snafu(display("failed to create an event (`{name}`)"))]
-    Os { source: Win32Error, name: String },
+    #[snafu(display("Failed to create a named event: `{name}`."))]
+    Os { source: OsError, name: String },
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum OpenEventError {
-    #[snafu(display("invalid event name: `{name}`"))]
+    #[snafu(display("Invalid event name: `{name}`."))]
     InvalidName {
         source: ToUC16StringError,
         name: String,
     },
 
-    #[snafu(display("failed to open an existing event (`{name}`)"))]
-    Os { source: Win32Error, name: String },
+    #[snafu(display("Failed to open an existing named event: `{name}`."))]
+    Os { source: OsError, name: String },
 }
 
 #[derive(Debug, Snafu)]
-#[snafu(display("failed to set the event"))]
+#[snafu(display("Failed to set (signal) an event."))]
 pub struct SetEventError {
-    source: Win32Error,
+    source: OsError,
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum WaitEventError {
-    #[snafu(display("timed out while waiting on the event"))]
+    #[snafu(display("Timed out while waiting on an event."))]
     Timeout,
 
-    #[snafu(display("failed to wait on the event"))]
-    Os { source: Win32Error },
+    #[snafu(display("Failed to wait on an event."))]
+    Os { source: OsError },
 }
 
 /// Represents a Win32 event object.
@@ -240,14 +251,14 @@ impl Event {
     pub fn set(&self) -> Result<(), SetEventError> {
         use windows::Win32::System::Threading::SetEvent;
         // SAFETY: setting an event object is always safe.
-        unsafe { SetEvent(self.handle.0) }.context(SetEventSnafu)?;
+        unsafe { SetEvent(self.handle.get()) }.context(SetEventSnafu)?;
         Ok(())
     }
 
     /// Blocks the current thread until this event is signaled.
-    pub fn wait(&self) -> Result<(), WaitEventError> {
+    pub fn wait(&self, should_block: bool) -> Result<(), WaitEventError> {
         // SAFETY: waiting an event object is always safe.
-        let result = unsafe { wait_for_single_object(self.handle.0) };
+        let result = unsafe { wait_for_single_object(self.handle.0, should_block) };
 
         match result {
             WaitSingle::Object0 => Ok(()),
@@ -261,17 +272,17 @@ impl Event {
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum OpenFileMappingError {
-    #[snafu(display("invalid file mapping name: `{name}`"))]
+    #[snafu(display("Invalid file mapping name: `{name}`."))]
     InvalidName {
         source: ToUC16StringError,
         name: String,
     },
 
-    #[snafu(display("failed to open an existing file mapping (`{name}`)"))]
-    Open { source: Win32Error, name: String },
+    #[snafu(display("Failed to open an existing named file mapping: `{name}`."))]
+    Open { source: OsError, name: String },
 
-    #[snafu(display("failed to map a view of the file mapping"))]
-    Map { source: Win32Error },
+    #[snafu(display("Failed to map a view of a file mapping."))]
+    Map { source: OsError },
 }
 
 /// Represents a file mapping object.
@@ -280,29 +291,15 @@ pub struct FileMapping {
     _handle: Handle,
     // SAFETY:
     // - Must have the same lifetime as `handle`.
-    // - Must point to a valid memory region of size `size`.
+    // - Must point to a valid non-empty memory region.
     // - The memory must be valid for reads and writes.
     ptr: NonNull<u8>,
-    // SAFETY:
-    // - Must not exceed the actual size of the mapping.
-    // - Must not exceed `isize::MAX`.
-    size: usize,
-    _marker: PhantomData<*mut u8>,
 }
 
 impl FileMapping {
     /// Opens an existing file mapping object.
-    ///
-    /// # Safety
-    /// - `size` must not exceed the actual size of the mapping object.
-    pub unsafe fn open_existing(name: &str, size: usize) -> Result<Self, OpenFileMappingError> {
+    pub unsafe fn open_existing(name: &str) -> Result<Self, OpenFileMappingError> {
         use windows::Win32::System::Memory::{FILE_MAP_WRITE, OpenFileMappingW};
-
-        assert!(size > 0, "`size` must not be zero");
-        assert!(
-            size <= isize::MAX as usize,
-            "`size` must not exceed `isize::MAX`"
-        );
 
         let name_wide =
             name.to_u16cstring()
@@ -324,41 +321,34 @@ impl FileMapping {
 
         // SAFETY: `OpenFileMappingW` always returns a valid handle on success.
         let handle = unsafe { Handle::new(raw_handle) };
-
-        // SAFETY:
-        // - `handle` refers to a valid mapping object.
-        // - `size` doesn't exceed the size of the mapping object.
-        unsafe { Self::from_handle(handle, size) }
+        Self::from_handle(handle)
     }
 
     /// Creates a `FileMapping` from an existing file mapping object handle.
-    ///
-    /// # Safety
-    /// - `size` must not exceed the actual size of the mapping object.
-    unsafe fn from_handle(handle: Handle, size: usize) -> Result<Self, OpenFileMappingError> {
+    fn from_handle(handle: Handle) -> Result<Self, OpenFileMappingError> {
         use windows::Win32::System::Memory::{FILE_MAP_WRITE, MapViewOfFile};
 
         // SAFETY: simply creating a new memory mapping is always safe.
-        let ptr = unsafe { MapViewOfFile(handle.0, FILE_MAP_WRITE, 0, 0, 0) }.Value;
+        let ptr = unsafe { MapViewOfFile(handle.get(), FILE_MAP_WRITE, 0, 0, 0) }.Value;
 
         let ptr = NonNull::new(ptr)
-            .ok_or_else(Win32Error::from_thread)
+            .ok_or_else(OsError::from_thread)
             .context(open_file_mapping_error::MapSnafu)?
             .cast();
 
         // SAFETY:
         // - `handle` refers to a valid file mapping object.
         // - `ptr` has the same lifetime as `handle`.
-        // - `ptr` points to a region of size `size`.
+        // - `ptr` points to a valid memory region.
         // - `FILE_MAP_WRITE` ensures that we have read-write access.
-        // - `size` doesn't exceed the size of the mapping object.
-        // - `size` doesn't exceed `isize::MAX`.
         Ok(FileMapping {
             _handle: handle,
             ptr,
-            size,
-            _marker: PhantomData,
         })
+    }
+
+    pub fn get_ptr(&self) -> NonNull<u8> {
+        self.ptr
     }
 }
 
@@ -373,50 +363,15 @@ impl<T> Lock<T> {
         Self { mutex, value }
     }
 
-    pub fn with_lock<F, B>(&mut self, f: F) -> Result<B, LockMutexError>
+    pub fn with<F, B>(&mut self, should_block: bool, f: F) -> Result<B, LockMutexError>
     where
         F: FnOnce(&mut T) -> B,
     {
-        self.mutex.with_lock(|| f(&mut self.value))
+        self.mutex.with_lock(should_block, || f(&mut self.value))
     }
 }
 
-#[derive(Debug)]
-pub struct SharedMemory {
-    mapping: Lock<FileMapping>,
-}
-
-impl SharedMemory {
-    /// Creates a new `SharedMemory` instance.
-    ///
-    /// # Safety
-    /// - The file mapping object referred to by `mapping` must be accessed
-    ///   only via `mapping` by this thread.
-    /// - All threads and processes must access that file mapping object only while
-    ///   holding (owning) the mutex referred to by `mutex`.
-    pub unsafe fn new(mapping: FileMapping, mutex: Mutex) -> Self {
-        Self {
-            mapping: Lock::new(mapping, mutex),
-        }
-    }
-
-    pub fn with<F, B>(&mut self, f: F) -> Result<B, LockMutexError>
-    where
-        F: FnOnce(&mut [u8]) -> B,
-    {
-        self.mapping.with_lock(|mapping| {
-            // SAFETY:
-            // - We have exclusive read-write access to the shared memory region.
-            // - This memory is "foreign", so initialization doesn't matter.
-            // - `ptr` points to memory region of at least `size` bytes.
-            // - `size_of::<u8>() * size` doesn't exceed `isize::MAX`.
-            let slice = unsafe { slice::from_raw_parts_mut(mapping.ptr.as_ptr(), mapping.size) };
-            f(slice)
-        })
-    }
-}
-
-unsafe fn wait_for_single_object(handle: HANDLE) -> WaitSingle {
+unsafe fn wait_for_single_object(handle: HANDLE, should_block: bool) -> WaitSingle {
     const WAIT_OBJECT_0: u32 = windows::Win32::Foundation::WAIT_OBJECT_0.0;
     const WAIT_TIMEOUT: u32 = windows::Win32::Foundation::WAIT_TIMEOUT.0;
     const WAIT_ABANDONED: u32 = windows::Win32::Foundation::WAIT_ABANDONED.0;
@@ -424,13 +379,18 @@ unsafe fn wait_for_single_object(handle: HANDLE) -> WaitSingle {
 
     use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
 
-    let result = unsafe { WaitForSingleObject(handle, INFINITE) }.0;
+    let timeout = match should_block {
+        true => INFINITE,
+        false => 0,
+    };
+
+    let result = unsafe { WaitForSingleObject(handle, timeout) }.0;
 
     match result {
         WAIT_OBJECT_0 => WaitSingle::Object0,
         WAIT_TIMEOUT => WaitSingle::Timeout,
         WAIT_ABANDONED => WaitSingle::Abandoned,
-        WAIT_FAILED => WaitSingle::Failed(Win32Error::from_thread()),
+        WAIT_FAILED => WaitSingle::Failed(OsError::from_thread()),
         _ => unreachable!(),
     }
 }
@@ -440,5 +400,5 @@ enum WaitSingle {
     Object0,
     Timeout,
     Abandoned,
-    Failed(Win32Error),
+    Failed(OsError),
 }

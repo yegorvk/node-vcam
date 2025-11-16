@@ -1,0 +1,114 @@
+name: publish
+env:
+    APP_NAME: node-vcam
+    CARGO_INCREMENTAL: "0"
+on:
+    push:
+        tags:
+            - "v*.*.*"
+            - "v*.*.*-*"
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+jobs:
+    lint:
+        name: Lint
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v5
+            - name: Install rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: stable-x86_64-pc-windows-msvc
+                  targets: x86_64-pc-windows-msvc
+                  components: clippy, rustfmt
+            - name: Rustfmt
+              run: cargo fmt -- --check
+            - name: Clippy
+              run: cargo clippy
+    build:
+        name: Build
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v5
+            - name: Setup node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 18
+            - name: Setup Yarn using corepack
+              run: corepack install
+            - name: Setup rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: stable-x86_64-pc-windows-msvc
+                  targets: x86_64-pc-windows-msvc
+            - name: Preserve Cargo cache
+              uses: Swatinem/rust-cache@v2
+            - name: Get Yarn cache directory path
+              id: yarn-cache-dir-path
+              shell: pwsh
+              run: |
+                  $dir = (yarn config get cacheFolder).Trim()
+                  "dir=$dir" | Out-File -FilePath $Env:GITHUB_OUTPUT -Encoding utf8 -Append
+            - name: Preserve Yarn cache
+              uses: actions/cache@v4
+              with:
+                  path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+                  key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+                  restore-keys: |
+                      ${{ runner.os }}-yarn-
+            - name: Install dependencies
+              run: yarn install
+            - name: Build
+              run: yarn build --target x86_64-pc-windows-msvc
+            - name: Upload artifact
+              uses: actions/upload-artifact@v5
+              with:
+                  name: bindings-x86_64-pc-windows-msvc
+                  path: |
+                      build/release/${{ env.APP_NAME }}.*.node
+                  if-no-files-found: error
+    publish:
+        name: Publish
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            id-token: write
+        needs:
+            - lint
+            - build
+        steps:
+            - uses: actions/checkout@v5
+            - name: Setup node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 18
+            - name: Setup Yarn using corepack
+              run: corepack install
+            - name: Install dependencies
+              run: yarn install
+            - name: Create npm dirs
+              run: yarn napi create-npm-dirs
+            - name: Download all artifacts
+              uses: actions/download-artifact@v6
+              with:
+                  path: artifacts
+            - name: Move artifacts
+              run: yarn artifacts
+            - name: Publish
+              run: |
+                  npm config set provenance true
+                  echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+
+                  # Check if this is a stable release (v1.2.3) or pre-release (v1.2.3-beta.1)
+                  if [[ $GITHUB_REF =~ refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "Publishing stable release: $GITHUB_REF"
+                    npm publish --access public
+                  else
+                    echo "Publishing pre-release: $GITHUB_REF"
+                    npm publish --tag next --access public
+                  fi
+              shell: bash
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

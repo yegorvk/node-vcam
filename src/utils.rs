@@ -12,7 +12,7 @@ impl<T> OptionExt<T> for Option<T> {
     where
         F: FnOnce() -> Result<T, E>,
     {
-        if let None = self {
+        if self.is_none() {
             *self = Some(f()?);
         }
 
@@ -21,16 +21,13 @@ impl<T> OptionExt<T> for Option<T> {
 }
 
 #[derive(Debug, Snafu)]
-#[snafu(
-    module,
-    display("failed to convert `str` to `U16CStr` (a nul-terminated UTF-16 string)")
-)]
+#[snafu(module, display("Failed to convert `str` to `U16CString`."))]
 pub struct ToUC16StringError {
     source: ContainsNulError,
 }
 
 #[derive(Debug, Snafu)]
-#[snafu(module, display("UTF-8 string contains a nul byte at position {}", source.nul_position()))]
+#[snafu(module, display("The string (UTF-8 encoded) contains a nul byte at position {}.", source.nul_position()))]
 pub struct ContainsNulError {
     source: widestring::error::ContainsNul<u16>,
 }
@@ -41,7 +38,7 @@ pub trait StrExt {
 
 impl StrExt for str {
     fn to_u16cstring(&self) -> Result<U16CString, ToUC16StringError> {
-        U16CString::from_str(&self)
+        U16CString::from_str(self)
             .context(contains_nul_error::ContainsNulSnafu)
             .context(to_uc16_string_error::ToUC16StringSnafu)
     }
