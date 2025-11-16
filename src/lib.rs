@@ -25,7 +25,7 @@ impl VirtualCamera {
         Default::default()
     }
 
-    /// Returns `true` if the camera is currently running, i.e., has been started.
+    /// Checks if the camera is currently running (i.e., has been started).
     #[napi(getter)]
     pub fn is_running(&self) -> bool {
         self.sender.is_some()
@@ -43,7 +43,12 @@ impl VirtualCamera {
         self.sender = None;
     }
 
-    /// Sends a new frame to the camera.
+    /// Sends a frame to the camera.
+    ///
+    /// # Parameters
+    /// - `width` - Image width in pixels.
+    /// - `height` - Image height in pixels.
+    /// - `image` - Image pixels in linear RGBA format with 8 bits per channel.
     #[napi]
     pub fn send(&mut self, width: u32, height: u32, image: &[u8]) -> Result<bool, napi::Error> {
         let sender = self.sender_mut()?;
