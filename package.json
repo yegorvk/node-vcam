@@ -29,7 +29,7 @@
         "x64"
     ],
     "engines": {
-        "node": ">=16"
+        "node": ">=18"
     },
     "publishConfig": {
         "registry": "https://registry.npmjs.org/",
