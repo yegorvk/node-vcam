@@ -45,7 +45,6 @@
         "format:prettier": "prettier . -w",
         "format:toml": "taplo format",
         "format:rs": "cargo fmt",
-        "lint": "cargo clippy",
         "prepare": "husky",
         "prepublishOnly": "napi prepublish -t npm"
     },
