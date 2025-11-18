@@ -7,7 +7,7 @@
     "types": "index.d.ts",
     "repository": {
         "type": "git",
-        "url": "git+http://git@github.com/yegorvk/node-vcam"
+        "url": "https://github.com/yegorvk/node-vcam"
     },
     "license": "MIT",
     "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
@@ -21,12 +21,6 @@
             "x86_64-pc-windows-msvc"
         ]
     },
-    "os": [
-        "win32"
-    ],
-    "cpu": [
-        "x64"
-    ],
     "engines": {
         "node": ">=18"
     },

@@ -35,6 +35,8 @@ jobs:
               uses: actions/setup-node@v6
               with:
                   node-version: 18
+            - name: Enable corepack
+              run: corepack enable
             - name: Setup Yarn using corepack
               run: corepack install
             - name: Setup rust
@@ -66,7 +68,7 @@ jobs:
               with:
                   name: bindings-x86_64-pc-windows-msvc
                   path: |
-                      build/release/${{ env.APP_NAME }}.*.node
+                      ${{ env.APP_NAME }}.*.node
                   if-no-files-found: error
     publish:
         name: Publish
@@ -83,18 +85,16 @@ jobs:
               uses: actions/setup-node@v6
               with:
                   node-version: 18
-            - name: Setup Yarn using corepack
-              run: corepack install
             - name: Install dependencies
-              run: yarn install
+              run: npm install
             - name: Create npm dirs
-              run: yarn napi create-npm-dirs
+              run: npx napi create-npm-dirs
             - name: Download all artifacts
               uses: actions/download-artifact@v6
               with:
                   path: artifacts
             - name: Move artifacts
-              run: yarn artifacts
+              run: npm run artifacts
             - name: Publish
               run: |
                   npm config set provenance true
