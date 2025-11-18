@@ -1,90 +1,24 @@
+#![cfg(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64"))]
+
+use snafu::{ResultExt, Snafu};
+
 use crate::{
-    utils::OptionExt,
-    win32::{
+    arch::win32::{
         CreateEventError, Event, FileMapping, Lock, LockMutexError, Mutex, OpenEventError,
         OpenFileMappingError, OpenMutexError, SetEventError, WaitEventError,
     },
+    backend::{Backend, Connector, ReceivedFrame, Retry, Stream},
+    image::{ImageExtent, ImageSpec, PixelFormat},
+    utils::OptionExt,
 };
-use core::slice;
-use snafu::{ResultExt, Snafu};
-use std::sync::atomic::AtomicI32;
-use std::{cell::UnsafeCell, ffi::c_int, ptr::NonNull, sync::atomic::Ordering};
+use std::{
+    cell::UnsafeCell,
+    ffi::c_int,
+    ptr::NonNull,
+    slice,
+    sync::atomic::{AtomicI32, Ordering},
+};
 
-#[derive(Debug, Copy, Clone)]
-pub struct ImageSpec {
-    extent: ImageExtent,
-    format: PixelFormat,
-}
-
-impl ImageSpec {
-    pub const fn new(extent: ImageExtent, format: PixelFormat) -> Self {
-        Self { extent, format }
-    }
-
-    const fn size_in_bytes(&self) -> usize {
-        self.format.size_in_bytes() * self.extent.area()
-    }
-}
-
-// Ensures that `ImageSpec::size_in_bytes` never overflows.
-const _: usize = ImageSpec::new(ImageExtent::MAX, PixelFormat::Rgba8Linear).size_in_bytes();
-
-#[derive(Debug, Copy, Clone)]
-pub enum PixelFormat {
-    Rgba8Linear,
-}
-
-impl PixelFormat {
-    const fn size_in_bytes(&self) -> usize {
-        match self {
-            PixelFormat::Rgba8Linear => 4 * size_of::<u8>(),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct ImageExtent {
-    width: u32,
-    height: u32,
-}
-
-impl ImageExtent {
-    pub const MAX: Self = Self {
-        width: 3840,
-        height: 2160,
-    };
-
-    pub fn new(width: u32, height: u32) -> Result<Self, ImageExtentError> {
-        if width > ImageExtent::MAX.width {
-            return Err(ImageExtentError::WidthTooLarge { width });
-        }
-
-        if height > ImageExtent::MAX.height {
-            return Err(ImageExtentError::HeightTooLarge { height });
-        }
-
-        Ok(Self { width, height })
-    }
-
-    const fn area(&self) -> usize {
-        self.width as usize * self.height as usize
-    }
-}
-
-// Ensures that `ImageExtent::area` never overflows.
-const _: usize = ImageExtent::MAX.area();
-
-#[derive(Debug, Snafu)]
-#[snafu(module)]
-pub enum ImageExtentError {
-    #[snafu(display("image width (={width}) must not exceed {}", ImageExtent::MAX.width))]
-    WidthTooLarge { width: u32 },
-
-    #[snafu(display("image height (={height}) must not exceed {}", ImageExtent::MAX.height))]
-    HeightTooLarge { height: u32 },
-}
-
-#[cfg(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64"))]
 type AtomicCInt = AtomicI32;
 
 #[repr(C)]
@@ -102,7 +36,7 @@ struct Header {
 }
 
 impl Header {
-    fn setup(&mut self, spec: &ImageSpec) -> Result<(), ImageTooLargeError> {
+    fn write(&mut self, spec: &ImageSpec) -> Result<(), WriteHeaderError> {
         const FORMAT_UINT8: c_int = 0;
         const RESIZE_MODE_LINEAR: c_int = 1;
         const MIRROR_MODE_DISABLED: c_int = 0;
@@ -111,25 +45,25 @@ impl Header {
         let image_size_in_bytes = spec.size_in_bytes();
 
         if image_size_in_bytes > self.max_size as usize {
-            return Err(ImageTooLargeError {
+            return Err(WriteHeaderError::ImageTooLarge {
                 image_bytes: image_size_in_bytes,
                 buffer_size: self.max_size as usize,
             });
         }
 
         const {
-            // Ensures that `spec.size.width` always fits into a `c_int`.
-            assert!(ImageExtent::MAX.width <= c_int::MAX as u32);
+            // Ensures that `extent.width()` always fits into a `c_int`.
+            assert!(ImageExtent::MAX.width() <= c_int::MAX as u32);
         }
 
-        let width = spec.extent.width as c_int;
+        let width = spec.extent.width() as c_int;
 
         const {
             // Ensures that `spec.size.height` always fits into a `c_int`.
-            assert!(ImageExtent::MAX.height <= c_int::MAX as u32);
+            assert!(ImageExtent::MAX.height() <= c_int::MAX as u32);
         }
 
-        let height = spec.extent.height as c_int;
+        let height = spec.extent.height() as c_int;
 
         let format = match spec.format {
             PixelFormat::Rgba8Linear => FORMAT_UINT8,
@@ -153,17 +87,20 @@ impl Header {
 }
 
 #[derive(Debug, Snafu)]
-#[snafu(display(
-    "The image ({image_bytes} bytes) is too large to fit inside the camera buffer ({buffer_size} bytes)."
-))]
-pub struct ImageTooLargeError {
-    image_bytes: usize,
-    buffer_size: usize,
+#[snafu(module)]
+pub enum WriteHeaderError {
+    #[snafu(display(
+        "The image ({image_bytes} bytes) is too large to fit inside the camera buffer ({buffer_size} bytes)."
+    ))]
+    ImageTooLarge {
+        image_bytes: usize,
+        buffer_size: usize,
+    },
 }
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
-pub enum AttachError {
+pub enum ConnectError {
     #[snafu(display("Failed to open the mutex guarding the shared buffer."))]
     OpenMutex { source: OpenMutexError },
 
@@ -184,12 +121,15 @@ pub enum AttachError {
     OpenSharedMemory { source: OpenFileMappingError },
 }
 
+impl Retry for ConnectError {
+    fn should_retry(&self) -> bool {
+        true
+    }
+}
+
 #[derive(Debug, Snafu)]
 #[snafu(module)]
 pub enum SendError {
-    #[snafu(display("The sender isn't attached to any virtual camera."))]
-    Detached,
-
     #[snafu(display("The camera is busy and cannot accept more frames."))]
     Busy,
 
@@ -199,52 +139,77 @@ pub enum SendError {
     #[snafu(display("Failed to lock the mutex guarding the shared buffer."))]
     LockMutex { source: LockMutexError },
 
-    #[snafu(transparent)]
-    ImageTooLarge { source: ImageTooLargeError },
+    #[snafu(display("Failed to write shared buffer header."))]
+    WriteHeader { source: WriteHeaderError },
 
     #[snafu(display("Failed to signal the `SENT` event."))]
     SignalSent { source: SetEventError },
 }
 
+impl Retry for SendError {
+    fn should_retry(&self) -> bool {
+        matches!(self, SendError::Busy)
+    }
+}
+
+impl ReceivedFrame for SendError {
+    fn received_frame(&self) -> bool {
+        false
+    }
+}
+
+pub struct UnityCapture;
+
+impl Backend for UnityCapture {
+    type Connector = UnityCaptureConnector;
+
+    fn connector(&self) -> Self::Connector {
+        UnityCaptureConnector::default()
+    }
+}
+
 #[derive(Debug, Default)]
-struct Detached {
+pub struct UnityCaptureConnector {
     mutex: Option<Mutex>,
     want_frame: Option<Event>,
     sent_frame: Option<Event>,
 }
 
-impl Detached {
-    fn attach(&mut self) -> Result<Attached, AttachError> {
+impl Connector for UnityCaptureConnector {
+    type ConnectError = ConnectError;
+    type Stream = UnityCaptureStream;
+
+    fn connect(&mut self) -> Result<Self::Stream, Self::ConnectError> {
         let mutex = self
             .mutex
             .try_get_or_insert_with(|| Mutex::open_existing("UnityCapture_Mutx"))
-            .context(attach_error::OpenMutexSnafu)?;
+            .context(connect_error::OpenMutexSnafu)?;
 
         let mapping = mutex
             .with_lock(true, || {
                 self.want_frame.try_get_or_insert_with(|| {
                     Event::create_new("UnityCapture_Want")
-                        .context(attach_error::CreateWantEventSnafu)
+                        .context(connect_error::CreateWantEventSnafu)
                 })?;
 
                 self.sent_frame.try_get_or_insert_with(|| {
                     Event::open_existing("UnityCapture_Sent")
-                        .context(attach_error::OpenSentEventSnafu)
+                        .context(connect_error::OpenSentEventSnafu)
                 })?;
 
                 let mapping = unsafe { FileMapping::open_existing("UnityCapture_Data") }
-                    .context(attach_error::OpenSharedMemorySnafu)?;
+                    .context(connect_error::OpenSharedMemorySnafu)?;
 
                 Ok(mapping)
             })
-            .context(attach_error::LockMutexSnafu)??;
+            .context(connect_error::LockMutexSnafu)??;
 
         let mutex = self.mutex.take().unwrap();
 
         let want_frame = self.want_frame.take().unwrap();
         let sent_frame = self.sent_frame.take().unwrap();
 
-        Ok(Attached {
+        Ok(UnityCaptureStream {
             want_frame,
             sent_frame,
             shared: Lock::new(mapping, mutex),
@@ -253,14 +218,16 @@ impl Detached {
 }
 
 #[derive(Debug)]
-struct Attached {
+pub struct UnityCaptureStream {
     want_frame: Event,
     sent_frame: Event,
     // SAFETY: the size of the mapping is at least `size_of::<Header>()`.
     shared: Lock<FileMapping>,
 }
 
-impl Attached {
+impl Stream for UnityCaptureStream {
+    type SendError = SendError;
+
     fn send_with<F>(&mut self, spec: &ImageSpec, f: F) -> Result<(), SendError>
     where
         F: FnOnce(&mut [u8]),
@@ -295,8 +262,8 @@ impl Attached {
                 }
 
                 header
-                    .setup(spec)
-                    .map_err(|e| SendError::ImageTooLarge { source: e })?;
+                    .write(spec)
+                    .map_err(|e| SendError::WriteHeader { source: e })?;
 
                 // SAFETY:
                 // - `ptr` points points a region of at least `size_of::<Header>()` bytes.
@@ -330,75 +297,5 @@ impl Attached {
             .context(send_error::LockMutexSnafu)??;
 
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-enum State {
-    Detached(Detached),
-    Attached(Attached),
-}
-
-pub struct Image<'a> {
-    spec: ImageSpec,
-    data: &'a [u8],
-}
-
-impl<'a> Image<'a> {
-    pub fn new(spec: ImageSpec, data: &'a [u8]) -> Result<Self, CreateImageError> {
-        let image_size_in_bytes = spec.size_in_bytes();
-
-        if image_size_in_bytes != data.len() {
-            return Err(CreateImageError::DataSizeMismatch {
-                expected: image_size_in_bytes,
-                actual: data.len(),
-            });
-        }
-
-        Ok(Self { spec, data })
-    }
-}
-
-#[derive(Debug, Snafu)]
-#[snafu(module)]
-pub enum CreateImageError {
-    #[snafu(display("Image data size mismatch (expected {expected} bytes, found {actual})."))]
-    DataSizeMismatch { expected: usize, actual: usize },
-}
-
-#[derive(Debug)]
-pub struct Sender {
-    state: State,
-}
-
-impl Sender {
-    pub fn new() -> Sender {
-        Sender {
-            state: State::Detached(Detached::default()),
-        }
-    }
-
-    pub fn attach(&mut self) -> Result<(), AttachError> {
-        if let State::Detached(state) = &mut self.state {
-            self.state = State::Attached(state.attach()?);
-        }
-
-        Ok(())
-    }
-
-    pub fn send_with<F>(&mut self, spec: &ImageSpec, f: F) -> Result<(), SendError>
-    where
-        F: FnOnce(&mut [u8]),
-    {
-        match &mut self.state {
-            State::Attached(state) => state.send_with(spec, f),
-            State::Detached(_) => Err(SendError::Detached),
-        }
-    }
-
-    pub fn send(&mut self, image: &Image) -> Result<(), SendError> {
-        self.send_with(&image.spec, |buf| {
-            buf.copy_from_slice(image.data);
-        })
     }
 }

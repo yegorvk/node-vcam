@@ -1,4 +1,5 @@
-use snafu::prelude::*;
+use snafu::{ResultExt, Snafu};
+use std::error::Error;
 use widestring::U16CString;
 
 pub trait OptionExt<T> {
@@ -41,5 +42,33 @@ impl StrExt for str {
         U16CString::from_str(self)
             .context(contains_nul_error::ContainsNulSnafu)
             .context(to_uc16_string_error::ToUC16StringSnafu)
+    }
+}
+
+#[derive(Debug, Snafu)]
+#[snafu(transparent)]
+pub(crate) struct DynError {
+    source: Box<dyn Error>,
+}
+
+trait IntoDynError {
+    fn into_dyn_error(self) -> DynError;
+}
+
+impl<E: Error + 'static> IntoDynError for E {
+    fn into_dyn_error(self) -> DynError {
+        DynError {
+            source: Box::new(self),
+        }
+    }
+}
+
+pub(crate) trait IntoDynResult<T> {
+    fn into_dyn_result(self) -> Result<T, DynError>;
+}
+
+impl<T, E: Error + 'static> IntoDynResult<T> for Result<T, E> {
+    fn into_dyn_result(self) -> Result<T, DynError> {
+        self.map_err(|e| e.into_dyn_error())
     }
 }

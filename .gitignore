@@ -15,4 +15,6 @@
 /Cargo.lock
 
 # Napi-rs
-/build/
+/index.js
+/index.d.ts
+/*.node

@@ -13,8 +13,7 @@
     "author": "Yegor Vaskonyan <yegor.vaskonyan@gmail.com>",
     "files": [
         "index.js",
-        "index.d.ts",
-        "build/release/index.js"
+        "index.d.ts"
     ],
     "napi": {
         "binaryName": "node-vcam",
@@ -37,10 +36,10 @@
     },
     "scripts": {
         "artifacts": "napi artifacts",
-        "build": "node scripts/napi-build.js --release",
-        "build:debug": "node scripts/napi-build.js",
-        "dev": "run-s build:debug \"node:debug -- {1}\" -- examples/animated.js",
-        "node:debug": "cross-env NODE_VCAM_DEBUG=1 node",
+        "build": "napi build --esm --platform --release",
+        "build:debug": "napi build --esm --platform",
+        "dev": "run-s build:debug example:animated",
+        "example:animated": "node examples/animated.js",
         "format": "run-p format:prettier format:rs format:toml",
         "format:prettier": "prettier . -w",
         "format:toml": "taplo format",

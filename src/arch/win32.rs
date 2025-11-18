@@ -1,5 +1,7 @@
+#![cfg(target_os = "windows")]
+
 use crate::utils::{StrExt, ToUC16StringError};
-use snafu::prelude::*;
+use snafu::{ResultExt, Snafu};
 use std::{
     fmt::{self, Display},
     ptr::NonNull,

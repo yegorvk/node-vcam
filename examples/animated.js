@@ -1,8 +1,8 @@
-import { VirtualCamera } from "../index.js";
+import { Backend, ImageFormat, VirtualCamera } from "../index.js";
 
 const FPS = 60;
 
-const camera = new VirtualCamera();
+const camera = new VirtualCamera(Backend.UnityCapture);
 const image = new Uint8Array(1280 * 720 * 4);
 
 let timer = 0;
@@ -19,6 +19,6 @@ setInterval(() => {
         }
     }
 
-    camera.send(1280, 720, image);
+    camera.send(1280, 720, ImageFormat.Rgba8Linear, image);
     timer++;
 }, 1000.0 / FPS);
